@@ -33,6 +33,7 @@
     "happy-dom": "^9.6.1",
     "highlight.js": "^11.9.0",
     "js-md5": "^0.8.3",
+    "markdown-it": "^14.1.0",
     "md-editor-v3": "^2.11.2",
     "microsoft-cognitiveservices-speech-sdk": "^1.27.0",
     "moment": "^2.29.4",
