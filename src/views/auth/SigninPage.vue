@@ -7,7 +7,9 @@ import { useSnackbarStore } from "@/stores/snackbarStore";
 const snackbarStore = useSnackbarStore();
 const { proxy } = getCurrentInstance();
 const router = useRouter();
-const store = useStore();
+
+
+
 const isLoading = ref(false);
 const isSignInDisabled = ref(false);
 
@@ -40,7 +42,7 @@ const handleLogin = async () => {
       if (response.data.code == "200") {
         localStorage.setItem("userInfo", JSON.stringify(data));
 
-        store.commit("updateUserId", data.userId);
+
         console.log(data.userId);
         console.log(data);
         snackbarStore.showSuccessMessage("登陆成功！");
@@ -52,7 +54,7 @@ const handleLogin = async () => {
           }else{
             router.push("/");
           }
-          
+
         }, 500); // 延迟3秒跳转
       }else{
         console.log("gggggggggg");
@@ -64,12 +66,12 @@ const handleLogin = async () => {
       email.value="";
       captcha.value="";
       }
-     
+
       isLoading.value = false;
       refreshCaptcha();
     isSignInDisabled.value = false;
       }
-    } 
+    }
   } else {
     console.log("no");
   }
@@ -90,14 +92,7 @@ function refreshCaptcha() {
       // 捕获异常并输出错误信息到控制台
       console.error('Error refreshing captcha:', error);
     });;
-    // 如果响应成功
-    // console.log(response);
-    // if (response.status === 200) {
-    //   // 创建一个 Blob URL 并将其赋值给 this.captchaImage
-    //   console.log("哈哈哈")
-    //   captchaImage.value = URL.createObjectURL(response.data);
-    //   console.log(captchaImage.value)
-    // }
+
   } catch (error) {
     console.error('Error refreshing captcha:', error);
   }
@@ -199,7 +194,7 @@ const resetErrors = () => {
           outlined
           validateOn="blur"
           @keyup.enter="handleLogin"
-          
+
         ></v-text-field>
         <img :src="captchaImage" @click="refreshCaptcha" alt="captcha"><br>
         <v-btn

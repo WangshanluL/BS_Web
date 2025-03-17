@@ -51,21 +51,13 @@ app.use(store)
 app.config.globalProperties.VueCookies = VueCookies;
 app.config.globalProperties.globalInfo = {
     bodyWidth: 1100,  //修改屏幕的大小
-    // avatarUrl: "/api/picture/",
-    // imageUrl: "/api/picture/",
-    // url_f:"/api",
-    // coverImage:"/api/cover/",
-    // avatarUrl: "/api/picture/",
-    // imageUrl: "/api/picture/",
-    // commentImage:"/api/commentPic/",
-    // url_f:"/api",
     coverImage:"http://127.0.0.1:5000/cover/",
     avatarUrl: "http://127.0.0.1:5000/picture/",
     imageUrl: "http://127.0.0.1:5000/picture/",
     commentImage:"http://127.0.0.1:5000/commentPic/",
     url_f:"http://127.0.0.1:5000",
 
-    
+
 }
 app.config.globalProperties.Verify = Verify;
 app.config.globalProperties.Message = Message;
