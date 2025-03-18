@@ -1,81 +1,37 @@
-<template>
-  <div class="chat-container">
-    <!-- 聊天消息区域 -->
-    <div class="message-list" ref="messageListRef">
-      <template v-for="message in messages" :key="message.id">
-        <div v-if="message.role === 'user'" class="user-message">
-          <div class="message-content">
-            {{ message.content }}
-          </div>
-        </div>
-        <div v-else class="bot-message">
-          <div class="message-content">
-            <div v-html="formatContent(message.content)"></div>
-            
-            <!-- 显示引用标签 -->
-            <div v-if="message.references && message.references.length > 0" class="reference-tags">
-              <el-tag 
-                v-for="(ref, idx) in message.references" 
-                :key="idx"
-                type="info"
-                effect="light"
-                @click="showKnowledgeGraph(ref.id)"
-                class="reference-tag"
-              >
-                <el-icon class="tag-icon"><Connection /></el-icon>
-                {{ ref.name }}
-              </el-tag>
-            </div>
-          </div>
-        </div>
-      </template>
-    </div>
-    
-    <!-- 输入区域 -->
-    <div class="input-area">
-      <el-input
-        v-model="inputMessage"
-        placeholder="请输入您的问题..."
-        type="textarea"
-        :rows="3"
-        resize="none"
-        @keyup.ctrl.enter="sendMessage"
-      />
-      <el-button type="primary" @click="sendMessage" :disabled="!inputMessage.trim()">
-        发送
-      </el-button>
-    </div>
-    
-    <!-- 知识图谱对话框 -->
-    <el-dialog
-      v-model="graphDialogVisible"
-      title="操作系统知识图谱"
-      width="80%"
-      destroy-on-close
-      top="5vh"
-      class="graph-dialog"
-    >
-      <div class="knowledge-graph-container" ref="graphContainerRef"></div>
-      
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="graphDialogVisible = false">关闭</el-button>
-          <el-button type="primary" @click="centerGraph">
-            居中图谱
-          </el-button>
-        </div>
-      </template>
-    </el-dialog>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue';
-import MarkdownIt from 'markdown-it';
+import { ref, onMounted, watch, onBeforeUnmount, computed, nextTick } from "vue";
+import { useSnackbarStore } from "@/stores/snackbarStore";
+import AnimationChat from "@/components/animations/AnimationChat1.vue";
+import AnimationAi from "@/components/animations/AnimationBot1.vue";
+import AnimationWaiting from "@/components/animations/AnimationSearch1.vue";
+import { countAndCompleteCodeBlocks } from "@/utils/aiUtils";
+import { scrollToBottom } from "@/utils/common";
+import { getCurrentInstance } from "vue";
+import { Vue3Lottie } from "vue3-lottie";
 import * as echarts from 'echarts';
-import { Connection } from '@element-plus/icons-vue';
+const animationUrl ="https://lottie.host/ca50b51e-bb42-49b0-bf96-a06c3af44b9a/e0gnNucSCb.json";
+const { proxy } = getCurrentInstance();
+import { useChatGPTStore } from "@/stores/chatGPTStore";
+import "md-editor-v3/lib/style.css";
+import MarkdownIt from 'markdown-it';
 
-// 类型定义
+// Markdown rendering
+const md = new MarkdownIt({
+  breaks: true,
+  linkify: true,
+  typographer: true,
+  html: true
+});
+
+const formatContent = (content) => {
+  return content.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" style="color:green" target="_blank">$1</a>');
+};
+
+const formatContent_md = (content: string): string => {
+  return md.render(content);
+};
+
+// Types for knowledge graph
 interface KnowledgeNode {
   id: number | string;
   name: string;
@@ -95,57 +51,24 @@ interface KnowledgeGraph {
   links: KnowledgeLink[];
 }
 
-interface ChatMessage {
-  id: number;
-  role: 'user' | 'assistant';
-  content: string;
-  references?: {
-    id: number | string;
-    name: string;
-  }[];
-}
-
-// Markdown 渲染
-const md = new MarkdownIt({
-  breaks: true,
-  linkify: true
-});
-
-const formatContent = (content: string): string => {
-  return md.render(content);
-};
-
-// 聊天相关状态
-const messageListRef = ref<HTMLElement | null>(null);
-const inputMessage = ref('');
-const messages = ref<ChatMessage[]>([
-  {
-    id: 1,
-    role: 'assistant',
-    content: '您好！我是操作系统知识助手，请问有什么可以帮助您的？',
-    references: []
-  }
-]);
-
-// 知识图谱相关状态
+// Knowledge graph related state
 const graphDialogVisible = ref(false);
 const graphContainerRef = ref<HTMLElement | null>(null);
-let graphInstance: echarts.ECharts | null = null;
+let graphInstance: any = null;
 let currentTopicId: number | string | null = null;
 
-// 类别颜色映射
+// Category colors and names for knowledge graph
 const categoryColors = [
-  '#5470c6', // 默认蓝色
-  '#91cc75', // 绿色
-  '#fac858', // 黄色
-  '#ee6666', // 红色
-  '#73c0de', // 浅蓝色
-  '#3ba272', // 绿松石色
-  '#fc8452', // 橙色
-  '#9a60b4'  // 紫色
+  '#5470c6', // Default blue
+  '#91cc75', // Green
+  '#fac858', // Yellow
+  '#ee6666', // Red
+  '#73c0de', // Light blue
+  '#3ba272', // Turquoise
+  '#fc8452', // Orange
+  '#9a60b4'  // Purple
 ];
 
-// 类别名称映射
 const categoryNames = {
   2: '管理单元',
   3: '概念',
@@ -153,152 +76,239 @@ const categoryNames = {
   5: '教学视频'
 };
 
-// 发送消息
-const sendMessage = async () => {
-  if (!inputMessage.value.trim()) return;
-  
-  const newMessage: ChatMessage = {
-    id: Date.now(),
-    role: 'user',
-    content: inputMessage.value
+// Sample data
+interface Item {
+  title: string;
+  text: string;
+}
+
+const customItems: Item[] = [
+  { title: '示例数据 1', text: '小红最近感觉到肌肉疼痛，尤其是在活动后。她还发现关节有些肿胀和僵硬。这些症状使她在日常生活中感到不适和困扰。小红想问："我是不是患上了关节炎？还是这可能是其他肌肉骨骼问题的症状？我该如何缓解这些不适？"' },
+  { title: '示例数据 2', text: '小红最近经常感到腹痛，尤其是在进食后。她还经常出现消化不良的症状，如胃部胀气和不适。这些症状影响了她的日常生活和饮食习惯。小红想问：她是不是患上了胃溃疡？还是这可能是其他消化系统疾病的症状？她该如何改善我的饮食和生活习惯？' },
+  { title: '示例数据 3', text: '小明感到身体不适，而后被诊断出患上了疱疹。在吃药的同时他渴望能够尽快恢复健康。所以有哪些食物能益于他恢复呢？' }
+];
+
+const items = ref(customItems);
+const snackbarStore = useSnackbarStore();
+const chatGPTStore = useChatGPTStore();
+
+// Close the config dialog
+const close = () => {
+  chatGPTStore.configDialog = false;
+};
+
+// Handle sample data card click
+const handleCardClick = (text) => {
+  userMessage.value = text;
+  close();
+};
+
+// Message and chat interface
+interface Message {
+  content: string;
+  role: "user" | "assistant" | "system";
+  relevant_nodes_links?: any[];
+  tavily_results?: any[];
+}
+//?代表可以没有的意思
+// Store additional context from search results
+interface SearchResults {
+  relevant_nodes_links: any[];
+  tavily_results: any[];
+}
+
+const searchResults = ref<SearchResults>({
+  relevant_nodes_links: [],
+  tavily_results: []
+});
+
+// User Input Message
+const userMessage = ref("");
+const tempMessage = ref("");
+const messages = ref<Message[]>([]);
+const userInfo = ref({});
+let socket = ref<WebSocket | null>(null);
+
+
+// WebSocket connection
+const connectWebSocket = () => {
+  // Construct WebSocket URL from the HTTP base URL
+  // Replace http:// with ws:// or https:// with wss://
+  const wsUrl = proxy.globalInfo.new_url_f.replace(/^http/, 'ws') + "/ws";
+
+  socket.value = new WebSocket(wsUrl);
+
+  socket.value.onopen = () => {
+    console.log("WebSocket connection established");
   };
-  
-  messages.value.push(newMessage);
-  const question = inputMessage.value;
-  inputMessage.value = '';
-  
-  // 滚动到底部
-  await nextTick();
-  if (messageListRef.value) {
-    messageListRef.value.scrollTop = messageListRef.value.scrollHeight;
-  }
-  
-  // 模拟API调用，获取回答
-  setTimeout(() => {
-    const botResponse: ChatMessage = {
-      id: Date.now(),
-      role: 'assistant',
-      content: `关于"${question}"的问题，线程是进程内的执行单元，是CPU调度的基本单位。同一进程中的多个线程共享进程的地址空间和资源，但拥有独立的程序计数器、寄存器集合和栈空间。线程具有并发性、共享性和独立性特征。`,
-      references: [
-        { id: 0, name: '线程定义' },
-        { id: 1, name: '实现方式' }
-      ]
-    };
-    
-    messages.value.push(botResponse);
-    
-    // 滚动到底部
-    nextTick(() => {
-      if (messageListRef.value) {
-        messageListRef.value.scrollTop = messageListRef.value.scrollHeight;
+
+  socket.value.onmessage = (event) => {
+    try {
+      // First try to parse as JSON
+      const jsonData = JSON.parse(event.data);
+      console.log("Received JSON data:", jsonData);
+
+      // Handle structured data
+      if (jsonData.relevant_nodes_links !== undefined && jsonData.tavily_results !== undefined) {
+        searchResults.value = {
+          relevant_nodes_links: jsonData.relevant_nodes_links,
+          tavily_results: jsonData.tavily_results
+        }
       }
-    });
-  }, 1000);
-};
+    } catch (e) {
+      // Not JSON, handle as streaming text
+      const textData = event.data;
+      console.log("Received text data:", textData);
+      iswaiting.value = false;
 
-// 显示知识图谱
-const showKnowledgeGraph = async (topicId: number | string) => {
-  currentTopicId = topicId;
-  graphDialogVisible.value = true;
-  
-  // 等待对话框渲染完成
-  await nextTick();
-  
-  // 获取知识图谱数据
-  const graphData = getKnowledgeGraphData();
-  
-  // 初始化图表
-  initGraph(graphData);
-};
+      if (textData.endsWith("[END]")) {
+        // End of streaming, finalize the message
 
-// 获取知识图谱数据
-const getKnowledgeGraphData = (): KnowledgeGraph => {
-  // 这里使用您提供的数据格式
-  return {
-    'nodes': [
-      {'id': 0, 'name': '线程定义', 'category': 3, 'value': '线程是进程内的执行单元，是CPU调度的基本单位。同一进程中的多个线程共享进程的地址空间和资源，但拥有独立的程序计数器、寄存器集合和栈空间。线程具有并发性、共享性和独立性特征。线程相比进程具有创建开销小、切换开销小、通信开销小等优点，适用于并发程序设计。线程分为系统级线程(内核线程)和用户级线程，可采用一对一模型、多对一模型或多对多模型进行实现。线程状态与进程状态类似，包括就绪、运行、阻塞等状态。'},
-      {'id': 1, 'name': '实现方式', 'category': 3, 'value': '内核级线程(KLT)由操作系统内核管理和调度，内核维护线程表和PCB，线程切换需要内核介入，可实现真正的并行(在多处理器环境下)。优点是内核能直接管理和调度线程，一个线程阻塞不会导致整个进程阻塞；缺点是线程创建和切换开销较大，需要用户态/内核态切换。用户级线程(ULT)由应用程序在用户空间通过线程库管理，对内核透明，内核仅感知进程。优点是线程创建和切换开销小，可以实现特定的调度算法；缺点是一个线程阻塞会导致整个进程阻塞，不能真正利用多处理器并行处理。多对多模型(组合实现)将多个用户级线程映射到较少的内核级线程上，结合两种实现方式的优点。'},
-      {'id': 2, 'name': '线程管理', 'category': 2, 'value': '线程管理提供进程内的并发执行单元，降低上下文切换开销，提高系统吞吐量和响应时间。'},
-      {'id': 3, 'name': '题目369:进程管理', 'category': 4, 'value': ''},
-      {'id': 4, 'name': '题目215:线程定义', 'category': 4, 'value': ''},
-      {'id': 5, 'name': '题目214:进程控制', 'category': 4, 'value': ''},
-      {'id': 6, 'name': '题目213:线程定义', 'category': 4, 'value': ''},
-      {'id': 7, 'name': '题目212:进程定义', 'category': 4, 'value': ''},
-      {'id': 8, 'name': '题目184:线程调度', 'category': 4, 'value': ''},
-      {'id': 9, 'name': '题目155:线程定义', 'category': 4, 'value': ''},
-      {'id': 10, 'name': '题目154:线程定义', 'category': 4, 'value': ''},
-      {'id': 11, 'name': '视频16:2.1.6_3 线程的状态与转换', 'category': 5, 'value': ''},
-      {'id': 12, 'name': '视频14:2.1.6_1 线程的概念与特点', 'category': 5, 'value': ''},
-      {'id': 13, 'name': '视频15:2.1.6_2 线程的实现方式和多线程模型', 'category': 5, 'value': ''}
-    ],
-    'links': [
-      {'source': 2, 'target': 0, 'type': 'HAS_CONCEPT'},
-      {'source': 2, 'target': 1, 'type': 'HAS_CONCEPT'},
-      {'source': 0, 'target': 3, 'type': 'HAS_TOPIC'},
-      {'source': 0, 'target': 4, 'type': 'HAS_TOPIC'},
-      {'source': 0, 'target': 5, 'type': 'HAS_TOPIC'},
-      {'source': 0, 'target': 6, 'type': 'HAS_TOPIC'},
-      {'source': 0, 'target': 7, 'type': 'HAS_TOPIC'},
-      {'source': 0, 'target': 8, 'type': 'HAS_TOPIC'},
-      {'source': 0, 'target': 9, 'type': 'HAS_TOPIC'},
-      {'source': 0, 'target': 10, 'type': 'HAS_TOPIC'},
-      {'source': 0, 'target': 11, 'type': 'HAS_VIDEO'},
-      {'source': 0, 'target': 12, 'type': 'HAS_VIDEO'},
-      {'source': 1, 'target': 13, 'type': 'HAS_VIDEO'}
-    ]
+        const finalContent = textData.replace("[END]", "");
+
+        // Check if we're in the middle of streaming
+        if (messages.value.length > 0 && messages.value[messages.value.length - 1].role === "assistant") {
+          // Update the last message
+          messages.value[messages.value.length - 1].content = finalContent;
+          messages.value[messages.value.length - 1].relevant_nodes_links = searchResults.value.relevant_nodes_links;
+          messages.value[messages.value.length - 1].tavily_results = searchResults.value.tavily_results;
+        } else {
+          // Create a new message
+          messages.value.push({
+            content: finalContent,
+            role: "assistant",
+            relevant_nodes_links:searchResults.value.relevant_nodes_links,
+            tavily_results:searchResults.value.tavily_results
+          });
+        }
+        searchResults.value.relevant_nodes_links = [];
+        searchResults.value.tavily_results = [];
+        // Reset streaming state
+      } else {
+        // Update or create assistant message
+        if (messages.value.length > 0 && messages.value[messages.value.length - 1].role === "assistant") {
+          // Update existing message
+          messages.value[messages.value.length - 1].content = textData;
+        } else {
+          // Create new message
+          messages.value.push({
+            content: textData,
+            role: "assistant",
+          });
+        }
+
+        // Ensure we scroll to show the latest content
+        scrollToBottom(document.querySelector(".message-container"));
+      }
+    }
+  };
+
+  socket.value.onerror = (error) => {
+    console.error("WebSocket error:", error);
+    snackbarStore.showErrorMessage("连接错误，请刷新页面重试");
+    iswaiting.value = false;
+  };
+
+  socket.value.onclose = () => {
+    console.log("WebSocket connection closed");
+    // Attempt to reconnect after a delay
+    setTimeout(() => {
+      if (!socket.value || socket.value.readyState !== WebSocket.OPEN) {
+        connectWebSocket();
+      }
+    }, 3000);
   };
 };
 
-// 初始化图表
-const initGraph = (graphData: KnowledgeGraph) => {
-  if (!graphContainerRef.value) return;
-  
-  if (!graphInstance) {
-    graphInstance = echarts.init(graphContainerRef.value);
-    
-    // 监听窗口大小变化
-    window.addEventListener('resize', () => {
-      graphInstance?.resize();
-    });
+// Show knowledge graph dialog
+const showKnowledgeGraph = async (relevant_nodes_links) => {
+  graphDialogVisible.value = true;
+  currentTopicId = null;
+
+  // Wait for dialog to render
+  await nextTick();
+  console.log("node结构", relevant_nodes_links);
+
+  // Get knowledge graph data
+  const graphData = relevant_nodes_links;
+
+  // Initialize graph after dialog is fully rendered
+  setTimeout(() => {
+    initGraph(graphData);
+  }, 300);
+};
+
+// Cleanup and destroy echarts instance
+const destroyGraph = () => {
+  if (graphInstance) {
+    graphInstance.dispose();
+    graphInstance = null;
   }
-  
-  // 处理节点大小
+};
+
+// Initialize knowledge graph
+const initGraph = (graphData: KnowledgeGraph) => {
+  if (!graphContainerRef.value) {
+    console.error("Graph container reference is null");
+    return;
+  }
+
+  // Always dispose previous instance before creating a new one
+  destroyGraph();
+
+  // Create a new echarts instance
+  graphInstance = echarts.init(graphContainerRef.value);
+
+  // 创建正确的类别数组，确保每个类别都有对应的索引
+  const categories = [
+    { name: '视频节点' },          // 索引 0
+    { name: '章节节点' },      // 索引 1
+    { name: '子章节节点' },          // 索引 2
+    { name: '概念节点' },          // 索引 3
+    { name: '题目节点' }       // 索引 4
+  ];
+
+  // Process node sizes and ensure correct category mapping
   const processedNodes = graphData.nodes.map(node => {
-    // 根据节点类型设置大小
+    // Set size based on node type
     let symbolSize = 40;
-    
-    switch (node.category) {
-      case 2: // 管理单元
+
+    // 确保节点的category匹配categories数组中的索引
+    let category = node.category;
+
+    // 如果category是数值类型但不在0-4范围内，设置默认值
+    if (typeof category === 'number' && (category < 0 || category > 4)) {
+      category = 0; // 默认类别
+    }
+
+    switch (category) {
+      case 2: // Management unit
         symbolSize = 60;
         break;
-      case 3: // 概念
+      case 3: // Concept
         symbolSize = 50;
         break;
-      case 4: // 题目
+      case 4: // Question
         symbolSize = 35;
         break;
-      case 5: // 视频
+      case 5: // Video
         symbolSize = 40;
         break;
       default:
         symbolSize = 45;
     }
-    
-    // 高亮当前选中节点
-    if (node.id === currentTopicId) {
-      symbolSize += 10;
-    }
-    
+
     return {
       ...node,
-      symbolSize
+      symbolSize,
+      category: category // 确保category属性正确设置
     };
   });
-  
-  // 设置链接标签
+
+  // Process links
   const processedLinks = graphData.links.map(link => {
     let label = '';
-    
+
     switch(link.type) {
       case 'HAS_CONCEPT':
         label = '包含概念';
@@ -312,7 +322,7 @@ const initGraph = (graphData: KnowledgeGraph) => {
       default:
         label = link.type;
     }
-    
+
     return {
       ...link,
       label: {
@@ -321,12 +331,12 @@ const initGraph = (graphData: KnowledgeGraph) => {
       },
       lineStyle: {
         width: 2,
-        curveness: 0.2
+        curveness: 0.3  // 增加曲率，使连线更容易区分
       }
     };
   });
-  
-  // 设置图表选项
+
+  // Set chart options
   const option = {
     title: {
       text: '操作系统知识图谱',
@@ -339,21 +349,22 @@ const initGraph = (graphData: KnowledgeGraph) => {
         if (params.dataType === 'node') {
           const node = params.data;
           let content = `<div style="font-weight:bold;margin-bottom:5px;">${node.name}</div>`;
-          
+
           if (node.value && node.value.length > 0) {
             content += `<div style="max-width:300px;word-wrap:break-word;">${node.value}</div>`;
           }
-          
+
           return content;
         } else if (params.dataType === 'edge') {
           return params.data.label ? params.data.label.formatter : params.name;
         }
-        
+
         return '';
       }
     },
     legend: {
-      data: Object.values(categoryNames),
+      // 直接使用categories数组中的name属性作为图例数据
+      data: categories.map(category => category.name),
       orient: 'vertical',
       left: '5%',
       top: '10%',
@@ -369,16 +380,17 @@ const initGraph = (graphData: KnowledgeGraph) => {
       layout: 'force',
       data: processedNodes,
       links: processedLinks,
-      categories: Object.entries(categoryNames).map(([key, value]) => ({
-        name: value
-      })),
+      // 使用categories数组
+      categories: categories,
       roam: true,
       draggable: true,
       focus: 'adjacency',
       label: {
         show: true,
         position: 'right',
-        formatter: '{b}'
+        formatter: '{b}',
+        distance: 10,  // 增加标签距离
+        fontSize: 12   // 设置合适的字体大小
       },
       edgeLabel: {
         show: false,
@@ -387,13 +399,15 @@ const initGraph = (graphData: KnowledgeGraph) => {
       },
       edgeSymbol: ['none', 'arrow'],
       force: {
-        repulsion: 100,
-        edgeLength: [80, 150],
+        repulsion: 350,        // 增加节点间的排斥力，从100提高到350
+        gravity: 0.1,          // 添加低重力值，避免节点太散
+        edgeLength: [150, 250], // 增加边的长度范围
+        friction: 0.2,         // 添加摩擦系数，使布局更稳定
         layoutAnimation: true
       },
       lineStyle: {
         color: 'source',
-        curveness: 0.2
+        curveness: 0.3  // 保持与上面设置的曲率一致
       },
       emphasis: {
         focus: 'adjacency',
@@ -405,12 +419,41 @@ const initGraph = (graphData: KnowledgeGraph) => {
         }
       }
     }],
-    color: categoryColors
+    // 确保颜色数组与categories对应
+    color: [
+      '#5470c6', // 默认蓝色
+      '#91cc75', // 管理单元 - 绿色
+      '#fac858', // 概念 - 黄色
+      '#ee6666', // 题目 - 红色
+      '#73c0de'  // 教学视频 - 浅蓝色
+    ],
+    toolbox: {
+      feature: {
+        dataZoom: {},
+        restore: {},
+        saveAsImage: {}
+      },
+      right: 20,
+      top: 20
+    }
   };
-  
+
+  // Apply options to chart
   graphInstance.setOption(option);
-  
-  // 自动聚焦到当前选中的节点
+
+  // Add window resize listener for this instance
+  const resizeHandler = () => {
+    if (graphInstance) {
+      graphInstance.resize();
+    }
+  };
+
+  window.addEventListener('resize', resizeHandler);
+
+  // Store the resize handler on the instance so we can remove it later
+  graphInstance._resizeHandler = resizeHandler;
+
+  // Auto focus on selected node
   if (currentTopicId !== null) {
     const currentNode = processedNodes.find(node => node.id === currentTopicId);
     if (currentNode) {
@@ -425,7 +468,7 @@ const initGraph = (graphData: KnowledgeGraph) => {
   }
 };
 
-// 居中图谱
+// Center graph
 const centerGraph = () => {
   if (graphInstance) {
     graphInstance.dispatchAction({
@@ -434,150 +477,416 @@ const centerGraph = () => {
   }
 };
 
-// 对话框关闭时释放图表实例
-watch(graphDialogVisible, (newVal) => {
+// Clean up WebSocket connection
+onBeforeUnmount(() => {
+  if (socket.value) {
+    socket.value.close();
+  }
+
+  // Also clean up any graph instance
+  destroyGraph();
+
+  // Remove any window event listeners
+  if (graphInstance && graphInstance._resizeHandler) {
+    window.removeEventListener('resize', graphInstance._resizeHandler);
+  }
+});
+
+onMounted(() => {
+  const userInfoData = localStorage.getItem('userInfo');
+  const userinf = JSON.parse(userInfoData);
+  userInfo.value = userinf;
+
+  // Initialize WebSocket connection
+  connectWebSocket();
+
+  // Load initial messages from local storage or keep empty array
+  const savedMessages = localStorage.getItem(`chatMessages_${userInfo.value.userId}`);
+  if (savedMessages) {
+    try {
+      messages.value = JSON.parse(savedMessages);
+    } catch (e) {
+      console.error("Failed to parse saved messages:", e);
+      messages.value = [];
+    }
+  }
+});
+
+// Save messages to local storage
+const saveMessages = () => {
+  localStorage.setItem(`chatMessages_${userInfo.value.userId}`, JSON.stringify(messages.value));
+};
+
+const dialogVisible = ref(false);
+
+const handleClose = (done: () => void) => {
+  ElMessageBox.confirm('你确定关闭对话框吗?')
+    .then(() => {
+      done();
+    })
+    .catch(() => {
+      // catch error
+    });
+};
+
+const clearchatmessages = () => {
+  messages.value = [];
+  saveMessages();
+  dialogVisible.value = false;
+  snackbarStore.showSuccessMessage("删除成功");
+};
+
+watch(
+  () => messages.value,
+  (newVal, oldVal) => {
+    console.log("消息更新");
+    saveMessages();
+
+    // Check for new values and scroll to bottom
+    if (newVal) {
+      scrollToBottom(document.querySelector(".message-container"));
+    }
+  },
+  { immediate: true, deep: true }
+);
+
+// Watch for dialog visibility
+watch(graphDialogVisible, (newVal, oldVal) => {
   if (!newVal && graphInstance) {
-    // 对话框关闭时不销毁实例，只是重置当前状态
+    // Cleanup when dialog closes
+    destroyGraph();
     currentTopicId = null;
   }
 });
 
-// 组件挂载后初始化
-onMounted(() => {
-  // 可以在这里进行其他初始化工作
+const isLoading = ref(false);
+const iswaiting = ref(false);
+
+// Send Message via WebSocket
+const sendMessage = async () => {
+  if (userMessage.value) {
+    // Add the message to the list
+    messages.value.push({
+      content: userMessage.value,
+      role: "user",
+    });
+    tempMessage.value = userMessage.value;
+    userMessage.value = "";
+    await createCompletion();
+  }
+};
+
+// Send message to process via WebSocket
+const createCompletion = async () => {
+  // Get content
+  const content = tempMessage.value;
+
+  try {
+    iswaiting.value = true;
+
+    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      socket.value.send(JSON.stringify({
+        message: content,
+        userId: userInfo.value.userId
+      }));
+    } else {
+      snackbarStore.showErrorMessage("连接错误，请刷新页面重试");
+      iswaiting.value = false;
+    }
+  } catch (error) {
+    snackbarStore.showErrorMessage("网络错误，请重试");
+    iswaiting.value = false;
+  }
+};
+
+const displayMessages = computed(() => {
+  if (messages.value.length === 0) return [];
+
+  const messagesCopy = messages.value.slice(); // Create a copy of the original array
+
+  // Process each message to ensure code blocks are properly formatted
+  return messagesCopy.map(message => ({
+    ...message,
+    content: countAndCompleteCodeBlocks(message.content),
+  }));
 });
+
+const handleKeydown = (e) => {
+  if (e.key === "Enter" && (e.altKey || e.shiftKey)) {
+    // When Alt or Shift + Enter is pressed, insert a newline
+    e.preventDefault();
+    userMessage.value += "\n";
+  } else if (e.key === "Enter") {
+    // When only Enter is pressed, send the message
+    e.preventDefault();
+    sendMessage();
+  }
+};
+
+const inputRow = ref(1);
 </script>
+<template>
+  <div class="chat-bot">
+    <!-- Clear chat history dialog -->
+    <el-dialog
+      v-model="dialogVisible"
+      title="Tips"
+      width="500"
+      :before-close="handleClose"
+    >
+      <span>请问你确定删除聊天记录吗？一旦删除，无法恢复</span>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="dialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="clearchatmessages">确定</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- Knowledge Graph Dialog -->
+    <v-dialog
+      v-model="graphDialogVisible"
+      width="80%"
+      content-class="graph-dialog"
+    >
+      <v-card>
+        <v-card-title class="text-center">操作系统知识图谱</v-card-title>
+        <v-card-text>
+          <div class="knowledge-graph-container" ref="graphContainerRef" style="width: 100%; height: 600px;"></div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn color="primary" variant="text" @click="centerGraph">居中图谱</v-btn>
+          <v-btn color="primary" variant="text" @click="graphDialogVisible = false">关闭</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <div class="messsage-area">
+      <perfect-scrollbar v-if="messages.length > 0" class="message-container">
+        <template v-for="message in displayMessages" :key="message">
+          <div v-if="message.role === 'user'">
+            <div class="pa-4 user-message">
+              <v-avatar class="ml-4" rounded="sm" variant="elevated">
+                <img :src="proxy.globalInfo.avatarUrl + userInfo.userId+'.jpg'" alt="alt" />
+              </v-avatar>
+              <v-card class="text-pre-wrap" theme="dark" color="blue-grey">
+                <v-card-text><b>{{ message.content }}</b></v-card-text>
+              </v-card>
+            </div>
+          </div>
+          <div v-else>
+            <div class="pa-2 pa-md-5 assistant-message">
+              <v-avatar
+                class="d-none d-md-block mr-2 mr-md-4"
+                rounded="sm"
+                variant="elevated"
+              >
+                <img src="@/assets/s1.png" alt="alt" />
+              </v-avatar>
+              <v-card>
+                <div>
+                  <v-card class="text-pre-wrap" theme="dark" color="primary">
+                    <v-card-text>
+                      <b><span v-html="formatContent(message.content)"></span></b>
+
+                      <!-- Template fix -->
+                      <div class="reference-tags mt-3" v-if="message.relevant_nodes_links">
+                        <v-chip
+                        variant="elevated"
+                        color="success"
+                        class="mr-2 mb-2 knowledge-graph-chip"
+                        @click="showKnowledgeGraph(message.relevant_nodes_links)"
+                      >
+                        <v-icon start>mdi-connection</v-icon>
+                        知识图谱可视化
+                      </v-chip>
+                      </div>
+                    </v-card-text>
+                  </v-card>
+                </div>
+              </v-card>
+            </div>
+          </div>
+        </template>
+        <div v-if="isLoading">
+          <div class="pa-6">
+            <div class="message">
+              <AnimationAi :size="100" />
+            </div>
+          </div>
+        </div>
+        <div v-if="iswaiting">
+          <div class="pa-6">
+            <div class="message">
+              <AnimationWaiting :size="150" />
+            </div>
+          </div>
+        </div>
+      </perfect-scrollbar>
+      <div class="no-message-container" v-else>
+        <h1 class="text-h1 text-md-h1 font-weight-bold" style="color: #344767;">
+          Chat With Me
+        </h1>
+        <Vue3Lottie
+          :animationLink="animationUrl"
+          :height="500"
+          :width="500"
+        />
+      </div>
+    </div>
+
+    <div class="input-area">
+      <v-sheet
+        color="transparent"
+        elevation="0"
+        class="input-panel d-flex align-end pa-1"
+      >
+        <v-btn class="mb-1" variant="elevated" style="margin-right: 10px;" icon @click="dialogVisible = true">
+          <v-icon class="text-primary">mdi-close-circle-outline</v-icon>
+          <v-tooltip
+            activator="parent"
+            location="top"
+            text="删除聊天记录"
+          ></v-tooltip>
+        </v-btn>
+        <v-btn
+          class="mb-1"
+          variant="elevated"
+          icon
+          @click="chatGPTStore.configDialog = true"
+        >
+          <v-icon size="30" class="text-primary">mdi-comment-text-multiple</v-icon>
+          <v-tooltip
+            activator="parent"
+            location="top"
+            text="样例数据"
+          ></v-tooltip>
+        </v-btn>
+        <transition name="fade">
+          <v-textarea
+            class="mx-2"
+            color="primary"
+            type="text"
+            clearable
+            variant="solo"
+            ref="input"
+            v-model="userMessage"
+            placeholder="Ask Anything"
+            hide-details
+            @keydown="handleKeydown"
+            :rows="inputRow"
+            @focus="inputRow = 3"
+            @blur="inputRow = 1"
+          >
+          </v-textarea>
+        </transition>
+
+        <v-btn class="mb-1" variant="elevated" icon>
+          <v-icon @click="sendMessage" class="text-primary">mdi-send</v-icon>
+        </v-btn>
+      </v-sheet>
+
+      <!-- Sample data dialog -->
+      <v-dialog v-model="chatGPTStore.configDialog" width="600">
+        <v-card>
+          <v-card-title class="font-weight-bold pa-5">示例数据</v-card-title>
+          <v-divider />
+          <v-card-text>
+            <v-data-iterator :items="items">
+              <template v-slot:default="{ items }">
+                <template v-for="(item) in items" :key="item">
+                  <v-card v-bind="item.raw" style="cursor:pointer;" @click="handleCardClick(item.raw.text)"></v-card>
+                  <br>
+                </template>
+              </template>
+            </v-data-iterator>
+          </v-card-text>
+
+          <v-card-actions>
+            <v-spacer></v-spacer>
+            <v-btn variant="flat" color="primary" @click="close">OK</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+    </div>
+  </div>
+</template>
 
 <style scoped>
-.chat-container {
+.knowledge-graph-chip {
+  font-weight: bold !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+  transition: transform 0.2s, box-shadow 0.2s !important;
+}
+
+.knowledge-graph-chip:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3) !important;
+}
+/* CSS fixes */
+.reference-tags {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 12px !important;
+}
+
+:deep(.v-chip) {
+  display: inline-flex !important;
+  visibility: visible !important;
+}
+.chat-bot {
+  height: 100%;
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
-  box-sizing: border-box;
 }
 
-.message-list {
+.messsage-area {
   flex: 1;
-  overflow-y: auto;
-  padding: 10px;
-  margin-bottom: 15px;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  background-color: #f9f9f9;
+  overflow: hidden;
+  position: relative;
 }
 
-.user-message, .bot-message {
-  margin-bottom: 15px;
+.message-container {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.no-message-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.input-area {
+  min-height: 70px;
+  padding: 10px;
+}
+
+.text-pre-wrap {
+  white-space: pre-wrap;
 }
 
 .user-message {
   display: flex;
   justify-content: flex-end;
+  align-items: flex-start;
 }
 
-.bot-message {
+.assistant-message {
   display: flex;
-  justify-content: flex-start;
-}
-
-.message-content {
-  max-width: 85%;
-  padding: 12px 16px;
-  border-radius: 8px;
-  word-break: break-word;
-}
-
-.user-message .message-content {
-  background-color: #ecf5ff;
-  color: #303133;
-}
-
-.bot-message .message-content {
-  background-color: #f5f7fa;
-  color: #303133;
-}
-
-.input-area {
-  display: flex;
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.input-area .el-input {
-  flex: 1;
+  align-items: flex-start;
 }
 
 .reference-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.reference-tag {
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.reference-tag:hover {
-  transform: scale(1.05);
-}
-
-.tag-icon {
-  margin-right: 5px;
 }
 
 .knowledge-graph-container {
-  width: 100%;
-  height: 600px;
-}
-
-:deep(.markdown-body) {
-  font-size: 14px;
-  line-height: 1.6;
-  
-  p {
-    margin: 8px 0;
-  }
-  
-  h1, h2, h3, h4, h5, h6 {
-    margin-top: 16px;
-    margin-bottom: 8px;
-  }
-  
-  ul, ol {
-    padding-left: 20px;
-    margin: 8px 0;
-  }
-  
-  code {
-    background-color: rgba(0, 0, 0, 0.05);
-    padding: 2px 4px;
-    border-radius: 3px;
-  }
-  
-  pre {
-    background-color: #f6f8fa;
-    padding: 12px;
-    border-radius: 4px;
-    overflow-x: auto;
-  }
-}
-
-:deep(.el-dialog__body) {
-  padding: 10px;
-}
-
-:deep(.graph-dialog .el-dialog__header) {
-  margin-right: 0;
-  text-align: center;
-}
-
-:deep(.graph-dialog .el-dialog__title) {
-  font-size: 18px;
-  font-weight: bold;
+  border: 1px solid #eaeaea;
+  border-radius: 8px;
 }
 </style>
