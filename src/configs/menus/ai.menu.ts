@@ -4,6 +4,10 @@ export default [
     key: "menu.chatbot_v1",
     text: "Chatbot_V1",
     link: "/ai/chatbot_v1",
+    // Add a property to indicate this can have chat history items
+    hasChatHistory: true,
+    // This will hold dynamic chat history items
+    children: []
   },
   // {
   //   icon: "mdi-robot-love-outline",
@@ -15,19 +19,16 @@ export default [
     icon: "mdi-image-multiple-outline",
     text: "File Upload Preview",
     link: "/ai/file-upload-chatbot",
-    key: "menu.data.fileUploadPreview",//也就是对应zhhan.ts就是中文的那个
+    key: "menu.data.fileUploadPreview",
   },{
-    // mdi-database
     icon: "mdi-face-woman-shimmer-outline",
     text: "智能导诊",
     link: "/ai/AiDetect",
     key: "menu.detect",
   },{
-    // mdi-database
     icon: "mdi-database",
     text: "知识图谱可视化",
     link: "/ai/neo4j",
     key: "menu.neo4j",
   }
-  
 ];
