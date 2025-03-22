@@ -31,7 +31,7 @@ const handleLogin = async () => {
     isLoading.value = true;
     isSignInDisabled.value = true;
 
-    const response = await axios.post(proxy.globalInfo.new_url_f + "/login", {
+    const response = await axios.post(proxy.globalInfo.new_url_f + "/users/login", {
       email: email.value,
       password: password.value,
       captcha:captcha.value
@@ -80,7 +80,7 @@ const captchaImage=ref("");
 function refreshCaptcha() {
   try {
     // 发起 Axios 请求获取新的验证码图片
-     axios.get(proxy.globalInfo.new_url_f + '/captcha', { responseType: 'blob' }).then(response => {
+     axios.get(proxy.globalInfo.new_url_f + '/users/captcha', { responseType: 'blob' }).then(response => {
       console.log(response)
       // 如果响应成功
       if (response.status === 200) {

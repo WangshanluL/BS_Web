@@ -25,7 +25,7 @@ const handleRegister = async () => {
   if (valid) {
     isLoading.value = true;
     isSignInDisabled.value = true;
-    const response = await axios.post(proxy.globalInfo.url_f + "/register", {
+    const response = await axios.post(proxy.globalInfo.url_f + "/users/register", {
       nickName: username.value,
       email: email.value,
       password: password.value,

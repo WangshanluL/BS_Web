@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, onBeforeUnmount, computed, nextTick ,onUnmounted} from "vue";
+import { ref, onMounted, watch, onBeforeUnmount, computed, nextTick } from "vue";
 import { useSnackbarStore } from "@/stores/snackbarStore";
 import AnimationChat from "@/components/animations/AnimationChat1.vue";
 import AnimationAi from "@/components/animations/AnimationBot1.vue";
@@ -14,52 +14,19 @@ const { proxy } = getCurrentInstance();
 import { useChatGPTStore } from "@/stores/chatGPTStore";
 import "md-editor-v3/lib/style.css";
 import MarkdownIt from 'markdown-it';
-import axios from "axios";
-import { useRouter } from "vue-router";
-import hljs from 'highlight.js'
-const router = useRouter();
-import VueMarkdownIt from 'vue-markdown-it'
 
-
-
-// 定义类型接口
-interface SearchOptions {
-  knowledgeGraph: number;
-  internet: number;
-  learningMaterials: number;
-}
-
-// 使用 reactive 创建响应式对象
-const searchOptions = reactive<SearchOptions>({
-  knowledgeGraph: 0,    // 知识图谱检索，默认关闭为0
-  internet: 0,          // 互联网检索，默认关闭为0
-  learningMaterials: 0  // 学习资料检索，默认关闭为0
+// Markdown rendering
+const md = new MarkdownIt({
+  breaks: true,
+  linkify: true,
+  typographer: true,
+  html: true
 });
 
-// 更新搜索选项的方法
-const updateSearchOptions = () => {
-  console.log('搜索选项已更新:', searchOptions);
-  // 如果需要立即发送到后端，可以调用 sendSearchOptionsToBackend()
+const formatContent = (content) => {
+  return content.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" style="color:green" target="_blank">$1</a>');
 };
 
-const md = new MarkdownIt({
-  html: true,
-  breaks: false,
-  linkify: true,
-  typographer: true
-})
-
-// const formatContent = (content) => {
-//   return content.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" style="color:green" target="_blank">$1</a>');
-// };
-
-const formatContent = (content: string) => {
-  // 将[citation:x]转换为markdown格式的引用
-  const processedContent = content.replace(/\[citation:(\d+)\]/g, '[^$1]')
-  
-  // 渲染markdown为HTML
-  return md.render(processedContent)
-}
 const formatContent_md = (content: string): string => {
   return md.render(content);
 };
@@ -115,7 +82,13 @@ interface Item {
   text: string;
 }
 
+const customItems: Item[] = [
+  { title: '示例数据 1', text: '小红最近感觉到肌肉疼痛，尤其是在活动后。她还发现关节有些肿胀和僵硬。这些症状使她在日常生活中感到不适和困扰。小红想问："我是不是患上了关节炎？还是这可能是其他肌肉骨骼问题的症状？我该如何缓解这些不适？"' },
+  { title: '示例数据 2', text: '小红最近经常感到腹痛，尤其是在进食后。她还经常出现消化不良的症状，如胃部胀气和不适。这些症状影响了她的日常生活和饮食习惯。小红想问：她是不是患上了胃溃疡？还是这可能是其他消化系统疾病的症状？她该如何改善我的饮食和生活习惯？' },
+  { title: '示例数据 3', text: '小明感到身体不适，而后被诊断出患上了疱疹。在吃药的同时他渴望能够尽快恢复健康。所以有哪些食物能益于他恢复呢？' }
+];
 
+const items = ref(customItems);
 const snackbarStore = useSnackbarStore();
 const chatGPTStore = useChatGPTStore();
 
@@ -155,77 +128,18 @@ const tempMessage = ref("");
 const messages = ref<Message[]>([]);
 const userInfo = ref({});
 let socket = ref<WebSocket | null>(null);
-const chatId = ref(""); // Store the chat ID
 
 
-
-
-
-
-
-
-
-
-
-
-// 检查 chat_id 是否发生变化的函数
-const checkChatIdChange = () => {
-  // 获取最新的 chat_id
-  const newChatId = localStorage.getItem('chat_id');
-  
-  // 检查值是否发生变化
-  if (newChatId !== chatId.value) {
-    console.log('chat_id 从', chatId.value, '变更为', newChatId);
-    
-    // TODO: 在 chat_id 变化时添加你的自定义操作
-    fetchChatHistory();
-
-  }
-};
-
-
-
-// 设置检查的时间间隔
-let intervalId: number | null = null;
-
-
-onUnmounted(() => {
-  // 当组件卸载时清除时间间隔
-  if (intervalId !== null) {
-    clearInterval(intervalId);
-  }
-});
-
-
-
-
-
-
-
-
-
-
-
-
-// WebSocket connection - now only connects when needed
+// WebSocket connection
 const connectWebSocket = () => {
-  // Only connect if socket is null or closed
-  if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-    return; // Already connected
-  }
-  
   // Construct WebSocket URL from the HTTP base URL
   // Replace http:// with ws:// or https:// with wss://
-  const wsUrl = proxy.globalInfo.new_url_f.replace(/^http/, 'ws') + "/chats/ws";
+  const wsUrl = proxy.globalInfo.new_url_f.replace(/^http/, 'ws') + "/ws";
 
   socket.value = new WebSocket(wsUrl);
 
   socket.value.onopen = () => {
     console.log("WebSocket connection established");
-    // Now that connection is open, we can send the message
-    if (tempMessage.value) {
-      sendMessageViaWebSocket();
-    }
   };
 
   socket.value.onmessage = (event) => {
@@ -269,12 +183,7 @@ const connectWebSocket = () => {
         }
         searchResults.value.relevant_nodes_links = [];
         searchResults.value.tavily_results = [];
-        
-        // Close the socket when done
-        if (socket.value) {
-          socket.value.close();
-          console.log("WebSocket connection closed after completion");
-        }
+        // Reset streaming state
       } else {
         // Update or create assistant message
         if (messages.value.length > 0 && messages.value[messages.value.length - 1].role === "assistant") {
@@ -302,109 +211,26 @@ const connectWebSocket = () => {
 
   socket.value.onclose = () => {
     console.log("WebSocket connection closed");
-    socket.value = null; // Reset socket to null when closed
-  };
-};
-function convertServerMessages(serverMessages) {
-  return serverMessages.map(msg => {
-    return {
-      content: msg.content,
-      role: msg.role as "user" | "assistant" | "system",
-      // 如果有其他字段需要处理，可以在这里添加
-      // 例如，将web_reference转换为relevant_nodes_links（如果需要）
-      relevant_nodes_links: msg.gene_reference ? msg.gene_reference : undefined,
-      tavily_results: msg.web_reference ? msg.web_reference : undefined,
-      // 其他可能需要的字段...
-    };
-  });
-}
-// Function to fetch chat history based on chat_id
-const fetchChatHistory = async () => {
-  // Check if we have a chat ID in local storage
-    const storedChatId = localStorage.getItem(`chat_id`);
-    
-    if (storedChatId) {
-            chatId.value = storedChatId;
-            if (userInfo.value.userId) {
-            try {
-              // 发送 axios POST 请求获取聊天记录
-              const response = await axios.post(proxy.globalInfo.new_url_f+'/chats/chatHistory', {
-                chat_id: storedChatId,
-                user_id: userInfo.value.userId
-              });
-              console.log("走到这一步",response.data)
-              // 处理返回的数据
-              if (response.data && response.data.code == "200") {
-                // 假设返回的数据结构中包含聊天记录数组
-                const serverMessages = response.data.data.messages;
-                
-                const convertedMessages = convertServerMessages(serverMessages);
-                console.log("abc",convertedMessages)
-  // 更新messages引用数组
-                messages.value = convertedMessages;
-                // TODO: 在这里处理聊天记录，例如更新到响应式变量中
-                
-              } else {
-                console.error('获取聊天记录失败:', response.data.message || '未知错误');
-              }
-            } catch (error) {
-              console.error('请求聊天记录时出错:', error);
-            }
-          } else {
-            console.warn('未找到 chat_id 或 user_id，无法获取聊天记录');
-          }
-          
-          // 如果请求失败或没有必要的参数，返回空数组
-        
-
-
-
-
-    // Mock data for demonstration
-    const mockChatHistory = [
-      {
-        content: "你好，我有一些健康方面的问题想咨询一下",
-        role: "user"
-      },
-      {
-        content: "你好！很高兴能帮助你解答健康方面的问题。请告诉我你遇到了什么问题，我会尽力为你提供有用的信息和建议。",
-        role: "assistant",
-        relevant_nodes_links: [],
-        tavily_results: []
-      },
-      {
-        content: "我最近有些头痛，可能是工作压力太大了",
-        role: "user"
-      },
-      {
-        content: "理解你因工作压力导致头痛的困扰。压力性头痛很常见，通常表现为两侧太阳穴或后脑勺的持续性疼痛。\n\n缓解方法：\n1. 定期休息，避免长时间盯着屏幕\n2. 确保充足睡眠（7-8小时）\n3. 保持水分摄入\n4. 尝试放松技巧如深呼吸或冥想\n5. 适度运动有助于减轻压力\n6. 必要时可服用非处方止痛药\n\n如果头痛剧烈、突然发作、伴随发烧或持续时间长，建议及时就医。平衡工作与生活也很重要，考虑合理安排工作计划，适当委派任务。",
-        role: "assistant",
-        relevant_nodes_links: [],
-        tavily_results: []
+    // Attempt to reconnect after a delay
+    setTimeout(() => {
+      if (!socket.value || socket.value.readyState !== WebSocket.OPEN) {
+        connectWebSocket();
       }
-    ];
-    
-    // Set the mock data to messages
-    // messages.value = mockChatHistory;
-    return true;
-  }
-
-  //!这里不应该直接return false，  如果没找到chat_id,则需要向后端发送请求，然后获取一个chat_id存本地,然后切换路由到有chat_id的，算了，这样不好，点击new chat的时候直接发送请求，然后路由直接切换吧
-  
-  return false;
+    }, 3000);
+  };
 };
 
 // Show knowledge graph dialog
 const showKnowledgeGraph = async (relevant_nodes_links) => {
   graphDialogVisible.value = true;
   currentTopicId = null;
-  console.log("relevant_nodes_links",relevant_nodes_links)
+
   // Wait for dialog to render
   await nextTick();
-  
+  console.log("node结构", relevant_nodes_links);
+
   // Get knowledge graph data
-  const graphData = JSON.parse(relevant_nodes_links);
-  console.log("node结构", graphData);
+  const graphData = relevant_nodes_links;
 
   // Initialize graph after dialog is fully rendered
   setTimeout(() => {
@@ -426,7 +252,7 @@ const initGraph = (graphData: KnowledgeGraph) => {
     console.error("Graph container reference is null");
     return;
   }
-  console.log("wocao",graphData)
+
   // Always dispose previous instance before creating a new one
   destroyGraph();
 
@@ -655,7 +481,6 @@ const centerGraph = () => {
 onBeforeUnmount(() => {
   if (socket.value) {
     socket.value.close();
-    socket.value = null;
   }
 
   // Also clean up any graph instance
@@ -672,22 +497,24 @@ onMounted(() => {
   const userinf = JSON.parse(userInfoData);
   userInfo.value = userinf;
 
-  // Load chat history based on chat_id instead of connecting WebSocket immediately
-  fetchChatHistory();
-    // 每2秒检查一次（可以根据需要调整时间）
-  intervalId = window.setInterval(checkChatIdChange, 1000);
-  console.log(messages.value);
+  // Initialize WebSocket connection
+  connectWebSocket();
+
+  // Load initial messages from local storage or keep empty array
+  const savedMessages = localStorage.getItem(`chatMessages_${userInfo.value.userId}`);
+  if (savedMessages) {
+    try {
+      messages.value = JSON.parse(savedMessages);
+    } catch (e) {
+      console.error("Failed to parse saved messages:", e);
+      messages.value = [];
+    }
+  }
 });
 
 // Save messages to local storage
 const saveMessages = () => {
   localStorage.setItem(`chatMessages_${userInfo.value.userId}`, JSON.stringify(messages.value));
-  
-  // If this is a new chat, generate a new chat ID and save it
-  if (!chatId.value && messages.value.length > 0) {
-
-    localStorage.setItem(`chat_id`, chatId.value);
-  }
 };
 
 const dialogVisible = ref(false);
@@ -705,11 +532,6 @@ const handleClose = (done: () => void) => {
 const clearchatmessages = () => {
   messages.value = [];
   saveMessages();
-  
-  // Clear chat ID as well
-  chatId.value = "";
-  localStorage.removeItem(`chat_id`);
-  
   dialogVisible.value = false;
   snackbarStore.showSuccessMessage("删除成功");
 };
@@ -740,62 +562,9 @@ watch(graphDialogVisible, (newVal, oldVal) => {
 const isLoading = ref(false);
 const iswaiting = ref(false);
 
-// Send the message via the established WebSocket connection
-const sendMessageViaWebSocket = () => {
-  if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-    socket.value.send(JSON.stringify({
-      user_message: tempMessage.value,
-      user_id: userInfo.value.userId,
-      chat_id: chatId.value,
-      search_options:searchOptions
-       // Include chat ID if available
-    }));
-  } else {
-    // If socket isn't ready yet, the message will be sent in the onopen handler
-    console.log("WebSocket not yet open, message will be sent when connection is established");
-  }
-};
-
-// Send Message - now establishes connection first
+// Send Message via WebSocket
 const sendMessage = async () => {
-
   if (userMessage.value) {
-    //创建新聊天****************************************************************************** start
-    const storedChatId = localStorage.getItem(`chat_id`);
-    if (!storedChatId){
-      try {
-      // 向后端发送创建新聊天的请求
-      const response = await axios.post(proxy.globalInfo.new_url_f + '/chats/newChat', {
-        user_id: userInfo.value.userId
-      });
-      
-      // 检查响应状态码是否成功
-      if (response.data.code === 200) {
-        // 从响应中获取chat_id
-        const chatId = response.data.data.chat_id;
-        
-        // 将chat_id存储到localStorage
-        localStorage.setItem('chat_id', chatId);
-        
-        // 导航到聊天页面
-        router.push(`/ai/chatbot_v1/${chatId}`);
-        // 显示成功提示
-        
-      } else {
-        // 处理错误情况
-        console.error('创建聊天失败:', response.data.message);
-        // 显示错误提示
-        snackbarStore.showErrorMessage(`创建聊天失败: ${response.data.message}`);
-      }
-    } catch (error) {
-      // 处理网络错误或其他异常
-      console.error('请求发生错误:', error);
-      // 显示网络错误提示
-      snackbarStore.showErrorMessage("连接错误，请刷新页面重试");
-    }
-    }
-    //****************************************************************************** end
-
     // Add the message to the list
     messages.value.push({
       content: userMessage.value,
@@ -803,26 +572,32 @@ const sendMessage = async () => {
     });
     tempMessage.value = userMessage.value;
     userMessage.value = "";
-    
-    iswaiting.value = true;
-    
-    try {
-      // Connect WebSocket and then send message
-      connectWebSocket();
-      
-      // If the socket is already open, send immediately
-      // Otherwise, it will be sent in the onopen handler
-      if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-        sendMessageViaWebSocket();
-      }
-    } catch (error) {
-      snackbarStore.showErrorMessage("网络错误，请重试");
-      iswaiting.value = false;
-    }
+    await createCompletion();
   }
 };
 
+// Send message to process via WebSocket
+const createCompletion = async () => {
+  // Get content
+  const content = tempMessage.value;
 
+  try {
+    iswaiting.value = true;
+
+    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      socket.value.send(JSON.stringify({
+        message: content,
+        userId: userInfo.value.userId
+      }));
+    } else {
+      snackbarStore.showErrorMessage("连接错误，请刷新页面重试");
+      iswaiting.value = false;
+    }
+  } catch (error) {
+    snackbarStore.showErrorMessage("网络错误，请重试");
+    iswaiting.value = false;
+  }
+};
 
 const displayMessages = computed(() => {
   if (messages.value.length === 0) return [];
@@ -849,7 +624,6 @@ const handleKeydown = (e) => {
 };
 
 const inputRow = ref(1);
-
 </script>
 <template>
   <div class="chat-bot">
@@ -893,13 +667,12 @@ const inputRow = ref(1);
         <template v-for="message in displayMessages" :key="message">
           <div v-if="message.role === 'user'">
             <div class="pa-4 user-message">
-
-              <v-card class="text-pre-wrap" theme="dark" color="blue-grey">
-                <v-card-text><b>{{ message.content }}</b></v-card-text>
-              </v-card>
               <v-avatar class="ml-4" rounded="sm" variant="elevated">
                 <img :src="proxy.globalInfo.avatarUrl + userInfo.userId+'.jpg'" alt="alt" />
               </v-avatar>
+              <v-card class="text-pre-wrap" theme="dark" color="blue-grey">
+                <v-card-text><b>{{ message.content }}</b></v-card-text>
+              </v-card>
             </div>
           </div>
           <div v-else>
@@ -913,12 +686,12 @@ const inputRow = ref(1);
               </v-avatar>
               <v-card>
                 <div>
-                  <v-card class="text-pre-wrap typora-style" theme="dark" color="primary">
+                  <v-card class="text-pre-wrap" theme="dark" color="primary">
                     <v-card-text>
-                      <span v-html="formatContent(message.content)"></span>
-                      
+                      <b><span v-html="formatContent(message.content)"></span></b>
+
                       <!-- Template fix -->
-                      <div class="reference-tags mt-3" v-if="message.relevant_nodes_links.length>0">
+                      <div class="reference-tags mt-3" v-if="message.relevant_nodes_links">
                         <v-chip
                         variant="elevated"
                         color="success"
@@ -961,83 +734,61 @@ const inputRow = ref(1);
           :width="500"
         />
       </div>
-              </div>
-              <div class="input-area">
-                    <v-sheet
-                      color="transparent"
-                      elevation="0"
-                      class="input-panel d-flex align-center pa-1"
-                    >
-                    <div class="d-flex align-center pa-2 border rounded-lg">
-              <div class="d-flex flex-column align-center mr-4">
-                <v-switch
-                  color="indigo"
-                  v-model="searchOptions.knowledgeGraph"
-                  :true-value="1"
-                  :false-value="0"
-                  inset
-                  hide-details
-                  class="mb-1"
-                  @change="updateSearchOptions"
-                ></v-switch>
-                <span class="text-caption custom-font">知识图谱检索</span>
-              </div>
+    </div>
 
-              <div class="d-flex flex-column align-center mr-4">
-                <v-switch
-                  inset
-                  color="indigo"
-                  v-model="searchOptions.internet"
-                  :true-value="1"
-                  :false-value="0"
-                  hide-details
-                  class="mb-1"
-                  @change="updateSearchOptions"
-                ></v-switch>
-                <span class="text-caption custom-font">互联网检索</span>
-              </div>
+    <div class="input-area">
+      <v-sheet
+        color="transparent"
+        elevation="0"
+        class="input-panel d-flex align-end pa-1"
+      >
+        <v-btn class="mb-1" variant="elevated" style="margin-right: 10px;" icon @click="dialogVisible = true">
+          <v-icon class="text-primary">mdi-close-circle-outline</v-icon>
+          <v-tooltip
+            activator="parent"
+            location="top"
+            text="删除聊天记录"
+          ></v-tooltip>
+        </v-btn>
+        <v-btn
+          class="mb-1"
+          variant="elevated"
+          icon
+          @click="chatGPTStore.configDialog = true"
+        >
+          <v-icon size="30" class="text-primary">mdi-comment-text-multiple</v-icon>
+          <v-tooltip
+            activator="parent"
+            location="top"
+            text="样例数据"
+          ></v-tooltip>
+        </v-btn>
+        <transition name="fade">
+          <v-textarea
+            class="mx-2"
+            color="primary"
+            type="text"
+            clearable
+            variant="solo"
+            ref="input"
+            v-model="userMessage"
+            placeholder="Ask Anything"
+            hide-details
+            @keydown="handleKeydown"
+            :rows="inputRow"
+            @focus="inputRow = 3"
+            @blur="inputRow = 1"
+          >
+          </v-textarea>
+        </transition>
 
-              <div class="d-flex flex-column align-center mr-4">
-                <v-switch
-                  inset
-                  color="indigo"
-                  v-model="searchOptions.learningMaterials"
-                  :true-value="1"
-                  :false-value="0"
-                  hide-details
-                  class="mb-1"
-                  @change="updateSearchOptions"
-                ></v-switch>
-                <span class="text-caption  custom-font">学习资料检索</span>
-              </div>
-            </div>
-                      
-          <transition name="fade">
-            <v-textarea
-              class="mx-2 flex-grow-1"
-              color="primary"
-              type="text"
-              clearable
-              variant="solo"
-              ref="input"
-              v-model="userMessage"
-              placeholder="Ask Anything"
-              hide-details
-              @keydown="handleKeydown"
-              :rows="inputRow"
-              @focus="inputRow = 3"
-              @blur="inputRow = 1"
-            >
-            </v-textarea>
-          </transition>
+        <v-btn class="mb-1" variant="elevated" icon>
+          <v-icon @click="sendMessage" class="text-primary">mdi-send</v-icon>
+        </v-btn>
+      </v-sheet>
 
-          <v-btn class="mb-1 ml-2" variant="elevated" icon>
-            <v-icon @click="sendMessage" class="text-primary">mdi-send</v-icon>
-          </v-btn>
-        </v-sheet>
-</div>
-          <!-- Sample data dialog -->
-          <v-dialog v-model="chatGPTStore.configDialog" width="600">
+      <!-- Sample data dialog -->
+      <v-dialog v-model="chatGPTStore.configDialog" width="600">
         <v-card>
           <v-card-title class="font-weight-bold pa-5">示例数据</v-card-title>
           <v-divider />
@@ -1058,121 +809,11 @@ const inputRow = ref(1);
           </v-card-actions>
         </v-card>
       </v-dialog>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.v-card-text h1 { font-size: 1.8em; margin-bottom: 0.8em; }
-.v-card-text h2 { font-size: 1.5em; margin-bottom: 0.6em; }
-.v-card-text p { margin-bottom: 1em; }
-.v-card-text code { background-color: #f5f5f5; padding: 0.2em 0.4em; border-radius: 3px; }
-.v-card-text pre { background-color: #f5f5f5; padding: 1em; overflow-x: auto; }
-.v-card-text blockquote { border-left: 4px solid #ddd; padding-left: 1em; color: #666; }
-.v-card-text sup { color: #0066cc; }
-.custom-font {
-  font-family: 'kaiti';
-  letter-spacing: 0.5px; /* 可选：稍微调整字母间距 */
-  font-weight: 900; /* 阿里巴巴普惠体黑体是比较粗的字体 */
-}
-/* Typora风格的CSS */
-.typora-style {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  color: #eeeeee;
-  font-size: 16px;
-}
-
-/* 修复列表项间距过大的问题 */
-.typora-style ol li,
-.typora-style ul li {
-  margin-bottom: 4px;
-}
-
-/* 关键修复：删除列表项内部段落的顶部和底部边距 */
-.typora-style li > p {
-  margin-top: 0 !important;
-  margin-bottom: 4px !important;
-}
-
-/* 标题紧凑化 */
-.typora-style h1, .typora-style h2, .typora-style h3, 
-.typora-style h4, .typora-style h5, .typora-style h6 {
-  margin-top: 1em;
-  margin-bottom: 0.5em;
-  font-weight: 500;
-  line-height: 1.3;
-}
-
-/* 段落样式 */
-.typora-style p {
-  margin-top: 0;
-  margin-bottom: 0.8em;
-}
-
-/* 整体列表样式 */
-.typora-style ul, .typora-style ol {
-  padding-left: 1.5em;
-  margin-top: 0.5em;
-  margin-bottom: 0.8em;
-}
-
-/* 嵌套列表间距控制 */
-.typora-style ul ul,
-.typora-style ol ol,
-.typora-style ul ol,
-.typora-style ol ul {
-  margin-top: 0.2em;
-  margin-bottom: 0.2em;
-}
-
-/* 代码样式 */
-.typora-style code {
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 0.9em;
-  background-color: rgba(255,255,255,0.1);
-  padding: 0.1em 0.3em;
-  border-radius: 3px;
-}
-
-/* 引用样式 */
-.typora-style blockquote {
-  margin: 0.8em 0;
-  padding-left: 1em;
-  border-left: 4px solid rgba(255,255,255,0.3);
-  color: #bcbcbc;
-}
-
-/* 链接样式 */
-.typora-style a {
-  color: #59acff;
-  text-decoration: none;
-}
-
-/* 表格样式 */
-.typora-style table {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 1em 0;
-}
-
-.typora-style table th, .typora-style table td {
-  border: 1px solid rgba(255,255,255,0.2);
-  padding: 6px 10px;
-}
-
-/* 脚注引用样式 */
-.typora-style sup[id^="fnref"] {
-  font-size: 0.8em;
-  vertical-align: super;
-  color: #59acff;
-}
-
-/* 强调样式增强可读性 */
-.typora-style strong {
-  color: #fff;
-  font-weight: 600;
-}
-
 .knowledge-graph-chip {
   font-weight: bold !important;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;

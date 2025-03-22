@@ -56,7 +56,7 @@ app.config.globalProperties.globalInfo = {
     imageUrl: "http://127.0.0.1:5000/picture/",
     commentImage:"http://127.0.0.1:5000/commentPic/",
     url_f:"http://127.0.0.1:5000",
-    new_url_f:"http://127.0.0.1:8000"
+    new_url_f:"http://127.0.0.1:8000/api/v1"
 
 }
 app.config.globalProperties.Verify = Verify;

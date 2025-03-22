@@ -3,6 +3,10 @@ export default [
   {
     path: "/ai/chatbot_v1",
     component: () => import("@/views/chatgpt/ChatBotV1.vue"),
+    beforeEnter: (to, from, next) => {
+      localStorage.removeItem('chat_id');
+      next();
+    },
     meta: {
       requiresAuth: true,
       layout: "landing",
@@ -10,7 +14,16 @@ export default [
       title: "ChatBotV1",
     },
   },
-
+  {
+    path: "/ai/chatbot_v1/:chat_id",
+    component: () => import("@/views/chatgpt/ChatBotV1.vue"),
+    meta: {
+      requiresAuth: true,
+      layout: "landing",
+      category: "AI",
+      title: "ChatBotV1",
+    },
+  },
   {
     path: "/ai/file-upload-chatbot",
     component: () => import("@/views/chatgpt/SkinChat.vue"),
